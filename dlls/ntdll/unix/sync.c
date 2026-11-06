@@ -4848,8 +4848,15 @@ void ios_wpm_reap_shared( unsigned long long mutex_addr, unsigned int depth, uns
     unsigned int owners;
     if (!mutex_addr || (mutex_addr & 3) || mutex_addr >= 0x8000000000ULL) return;
     {
-        char *page = (char *)((ULONG_PTR)mutex_addr & ~0x3fffULL);
-        if (msync( page, 0x4000, MS_ASYNC )) return;
+        mach_vm_address_t r_addr = (mach_vm_address_t)mutex_addr;
+        mach_vm_size_t r_size = 0;
+        vm_region_basic_info_data_64_t r_info;
+        mach_msg_type_number_t r_cnt = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t r_obj;
+        if (mach_vm_region( mach_task_self(), &r_addr, &r_size, VM_REGION_BASIC_INFO_64,
+                            (vm_region_info_t)&r_info, &r_cnt, &r_obj ) != KERN_SUCCESS) return;
+        if ((mach_vm_address_t)mutex_addr < r_addr || (mach_vm_address_t)mutex_addr >= r_addr + r_size) return;
+        if ((r_info.protection & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) return;
     }
     do
     {
@@ -4884,8 +4891,15 @@ void ios_srw_reap_exclusive( unsigned long long lock_addr, unsigned long long de
     unsigned int excl;
     if (!lock_addr || (lock_addr & 3) || lock_addr >= 0x8000000000ULL) return;
     {
-        char *page = (char *)((ULONG_PTR)lock_addr & ~0x3fffULL);
-        if (msync( page, 0x4000, MS_ASYNC )) return;
+        mach_vm_address_t r_addr = (mach_vm_address_t)lock_addr;
+        mach_vm_size_t r_size = 0;
+        vm_region_basic_info_data_64_t r_info;
+        mach_msg_type_number_t r_cnt = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t r_obj;
+        if (mach_vm_region( mach_task_self(), &r_addr, &r_size, VM_REGION_BASIC_INFO_64,
+                            (vm_region_info_t)&r_info, &r_cnt, &r_obj ) != KERN_SUCCESS) return;
+        if ((mach_vm_address_t)lock_addr < r_addr || (mach_vm_address_t)lock_addr >= r_addr + r_size) return;
+        if ((r_info.protection & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) return;
     }
     do
     {
