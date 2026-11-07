@@ -1459,9 +1459,10 @@ NTSTATUS WINAPI RtlWaitOnAddress( const void *addr, const void *cmp, SIZE_T size
 void WINAPI RtlWakeAddressAll( const void *addr )
 {
     struct futex_queue *queue = get_futex_queue( addr );
-    struct futex_entry *entry, *next;
-    unsigned int count = 0;
-    HANDLE tids[256];
+    /* 16 handles, not 256. libcef+0x35d0300 releases an SRW lock through
+     * this function with 0x590 bytes of guest stack left. The 256-handle
+     * array made a 0x880 frame and the prologue crossed the guard. */
+    HANDLE tids[16];
 
     if (!ios_sync_lean) InterlockedIncrement64( &ios_xp_nt.woa_wake_all );   /* ml1131 */
 
@@ -1469,32 +1470,32 @@ void WINAPI RtlWakeAddressAll( const void *addr )
 
     if (!addr) return;
 
-    spin_lock( &queue->lock );
-
-    if (!queue->queue.next)
-        list_init(&queue->queue);
-
-    LIST_FOR_EACH_ENTRY_SAFE( entry, next, &queue->queue, struct futex_entry, entry )
+    for (;;)
     {
-        if (entry->addr == addr)
+        struct futex_entry *entry, *next;
+        unsigned int count = 0;
+
+        spin_lock( &queue->lock );
+
+        if (!queue->queue.next)
+            list_init(&queue->queue);
+
+        LIST_FOR_EACH_ENTRY_SAFE( entry, next, &queue->queue, struct futex_entry, entry )
         {
+            if (entry->addr != addr) continue;
             entry->addr = NULL;
             list_remove( &entry->entry );
-            if (count == ARRAY_SIZE(tids))
-            {
-                NtAlertMultipleThreadByThreadId( tids, count, NULL, NULL );
-                count = 0;
-            }
             tids[count++] = (HANDLE)(ULONG_PTR)entry->tid;
+            if (count == ARRAY_SIZE(tids)) break;
         }
-    }
 
-    /* Try not to make a system call while holding a spinlock (even if that can be responsible for spurious wake
-     * up scenario). */
-    spin_unlock( &queue->lock );
-    ios_futex_note_wake( "all", addr, queue, count );
-    if (count)
-        NtAlertMultipleThreadByThreadId( tids, count, NULL, NULL );
+        /* Alert after dropping the lock. A full batch loops and scans again. */
+        spin_unlock( &queue->lock );
+        ios_futex_note_wake( "all", addr, queue, count );
+        if (count)
+            NtAlertMultipleThreadByThreadId( tids, count, NULL, NULL );
+        if (count < ARRAY_SIZE(tids)) break;
+    }
 }
 
 /***********************************************************************
