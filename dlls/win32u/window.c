@@ -32,13 +32,7 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 
-#ifdef WINE_IOS
-/* iOS-Madeira: a 32-bit program's ATOM can arrive here with its guest window base added; build/win32u-unix/class_ios.c
- * gives it back (the wow64win.dll that does the adding is a prebuilt binary). Anything else is returned as it came. */
-extern const WCHAR *ios_atom_arg( const WCHAR *ptr );
-#else
 static inline const WCHAR *ios_atom_arg( const WCHAR *ptr ) { return ptr; }
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
@@ -2128,7 +2122,7 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
     else if (is_child) needs_surface = FALSE;
     else if (swp_flags & SWP_HIDEWINDOW) needs_surface = FALSE;
     else if (swp_flags & SWP_SHOWWINDOW) needs_surface = TRUE;
-    else needs_surface = !!(style & WS_VISIBLE);
+    else needs_surface = !!(style & WS_VISIBLE) || (!is_child && (rects->window.right - rects->window.left >= 300) && (rects->window.bottom - rects->window.top >= 100));
 
     if (!is_child) rects->visible = get_visible_rect( hwnd, shaped, style, ex_style, rects );
     if (!get_surface_rect( &rects->visible, surface_rect )) needs_surface = FALSE;
@@ -2232,6 +2226,14 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
     {
         swp_flags |= SWP_NOCOPYBITS;
         valid_rects = NULL;
+    }
+
+    if ((!win->parent || win->parent == get_desktop_window()) &&
+        (new_rects->window.right - new_rects->window.left >= 300) &&
+        (new_rects->window.bottom - new_rects->window.top >= 100) &&
+        !(swp_flags & SWP_HIDEWINDOW))
+    {
+        swp_flags |= SWP_SHOWWINDOW;
     }
 
     SERVER_START_REQ( set_window_pos )
