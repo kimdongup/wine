@@ -4014,6 +4014,8 @@ void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CO
           * ARM64EC SEH dispatcher. So if the slot is NULL, fall through to it. */
          "cbz x16, 1f\n\t"
          "mov x9, x0\n\t"
+         "add x0, sp, #0x3b0+0x4d0\n\t" /* rec (x64 rcx) */
+         "mov x1, sp\n\t"               /* context (x64 rdx) */
          "blr x16\n"
          "1:\tadd x0, sp, #0x3b0+0x4d0\n\t" /* rec */
          "mov x1, sp\n\t"                   /* context */
