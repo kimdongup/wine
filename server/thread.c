@@ -2355,11 +2355,16 @@ DECL_HANDLER(init_thread)
     set_thread_base_priority( current, current->base_priority );
     set_thread_affinity( current, current->affinity );
 
-    reply->suspend = (is_thread_suspended( current ) || current->context != NULL);
 #ifdef WINE_IOS
-    /* a thread told not to park will never post a start context, so later
-     * reads fall back to the ordinary capture */
-    if (!reply->suspend) current->ios_start_pending = 0;
+    /* On iOS, thread-based process/thread startup proceeds immediately without
+     * waiting for an explicit NtResumeThread from the creator. Reset current->suspend
+     * and reply->suspend to 0 so wineserver does not permanently treat worker threads
+     * as suspended and refuse wait queue wakeups (matching process.c:1542). */
+    if (current->suspend > 0) current->suspend = 0;
+    reply->suspend = 0;
+    current->ios_start_pending = 0;
+#else
+    reply->suspend = (is_thread_suspended( current ) || current->context != NULL);
 #endif
 }
 
