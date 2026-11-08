@@ -1534,6 +1534,16 @@ DECL_HANDLER(init_process_done)
         current->ios_start_pending = 0;
         ios_start_wait_cleared( current );
     }
+    /* On iOS, thread-based process startup creates the initial thread with
+     * THREAD_CREATE_FLAGS_CREATE_SUSPENDED (current->suspend=1), but the client
+     * proceeds immediately without NtResumeThread. Reset current->suspend and
+     * reply->suspend to 0 so wineserver does not permanently treat the main thread
+     * as suspended and refuse wait queue wakeups. */
+    if (current->suspend > 0)
+    {
+        current->suspend = 0;
+    }
+    reply->suspend = 0;
 #endif
 }
 

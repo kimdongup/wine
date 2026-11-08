@@ -481,8 +481,18 @@ static inline void init_thread_structure( struct thread *thread )
         thread->inflight[i].server = thread->inflight[i].client = -1;
 }
 
+#ifdef WINE_IOS
+extern int ios_real_suspend_enabled(void);
+#endif
+
 static inline int is_thread_suspended( struct thread *thread )
 {
+#ifdef WINE_IOS
+    /* On iOS, threads are never genuinely stopped via mach unless MADEIRA_REAL_SUSPEND=1.
+     * When real suspend is not enabled, treating a thread as suspended prevents wakeups and
+     * deadlocks wait queues (e.g. IPC events between steam.exe and steamwebhelper). */
+    if (!ios_real_suspend_enabled()) return 0;
+#endif
     if (thread->suspend) return 1;
     return !thread->bypass_proc_suspend && thread->process->suspend;
 }
@@ -1575,7 +1585,11 @@ int wake_thread_queue_entry( struct wait_queue_entry *entry )
     client_ptr_t cookie;
 
     if (thread->wait != wait) return 0;  /* not the current wait */
+#ifdef WINE_IOS
+    if (ios_real_suspend_enabled() && is_thread_suspended( thread )) return 0;
+#else
     if (is_thread_suspended( thread )) return 0;  /* cannot acquire locks */
+#endif
 
     assert( wait->select != SELECT_WAIT_ALL );
 

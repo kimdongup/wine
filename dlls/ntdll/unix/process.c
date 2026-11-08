@@ -999,7 +999,8 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
     if(task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) == KERN_SUCCESS)
     {
         pvmi->VirtualSize = info.resident_size + info.virtual_size;
-        pvmi->PagefileUsage = info.virtual_size;
+        pvmi->PagefileUsage = info.resident_size;
+        pvmi->PeakPagefileUsage = info.resident_size_max;
         pvmi->WorkingSetSize = info.resident_size;
         pvmi->PeakWorkingSetSize = info.resident_size_max;
     }

@@ -4643,16 +4643,20 @@ static BOOL is_alert_tid_valid( HANDLE tid )
 {
     unsigned int block_idx;
 
+    if (!tid) return FALSE;
     handle_to_index( tid, &block_idx );
-    return block_idx <= ARRAY_SIZE(tid_alert_blocks);
+    return block_idx < ARRAY_SIZE(tid_alert_blocks);
 }
 
 static union tid_alert_entry *get_tid_alert_entry( HANDLE tid )
 {
-    unsigned int block_idx, idx = handle_to_index( tid, &block_idx );
+    unsigned int block_idx, idx;
     union tid_alert_entry *entry;
 
-    if (block_idx > ARRAY_SIZE(tid_alert_blocks))
+    if (!tid) return NULL;
+    idx = handle_to_index( tid, &block_idx );
+
+    if (block_idx >= ARRAY_SIZE(tid_alert_blocks))
     {
         FIXME( "tid %p is too high\n", tid );
         return NULL;
@@ -4723,15 +4727,31 @@ static union tid_alert_entry *get_tid_alert_entry( HANDLE tid )
 NTSTATUS WINAPI NtAlertMultipleThreadByThreadId( HANDLE *tids, ULONG count, void *unk1, void *unk2 )
 {
     unsigned int i;
+    static int mult_log_count = 0;
 
     TRACE( "%p %d %p %p\n", tids, (int)count, unk1, unk2 );
+
+    if (mult_log_count++ < 40 || count > 1)
+    {
+        TEB *teb = NtCurrentTeb();
+        dprintf( 2, "[alert-mult] count=%u caller=%04x first_tid=%p rev=b212\n",
+                 (unsigned)count,
+                 teb ? (unsigned)(ULONG_PTR)teb->ClientId.UniqueThread : 0,
+                 count ? tids[0] : NULL );
+    }
 
     if (unk1 || unk2) FIXME( "unk1 %p, unk2 %p.\n", unk1, unk2 );
     for (i = 0; i < count; ++i)
     {
-        if (!is_alert_tid_valid( tids[i] )) return STATUS_INVALID_CID;
+        if (is_alert_tid_valid( tids[i] ))
+        {
+            NtAlertThreadByThreadId( tids[i] );
+        }
+        else
+        {
+            dprintf( 2, "[alert-mult] SKIP invalid tid=%p (item %u/%u)\n", tids[i], i, (unsigned)count );
+        }
     }
-    for (i = 0; i < count; ++i) NtAlertThreadByThreadId( tids[i] );
     return STATUS_SUCCESS;
 }
 
@@ -4837,6 +4857,11 @@ static void ios_shared_futex_wake( const void *addr, int all )
         }
     }
     InterlockedExchange( &q->lock, 0 );
+    if (n > 0)
+    {
+        dprintf( 2, "[shared-futex-wake] addr=%p all=%d woke=%d first_tid=%04x rev=b212\n",
+                 addr, all, n, tids[0] );
+    }
     for (i = 0; i < n; i++)
         NtAlertThreadByThreadId( (HANDLE)(ULONG_PTR)tids[i] );
 }
@@ -5051,7 +5076,7 @@ void ios_alert_waiter_dump(void)
         unsigned int w0 = 0xdeaddead, w1 = 0xdeaddead;
         if (!a) continue;
         age = (now.QuadPart - (LONGLONG)ios_alert_waiters[i].since) / 10000000;
-        if (age < 60) continue;
+        if (age < 2) continue;
         shown++;
         /* Read the containing aligned word (SRW/read waits can pass lock+2).
          * A dead process may already have released or protected this page. */
@@ -5062,9 +5087,32 @@ void ios_alert_waiter_dump(void)
             if (((al + 4) & ~0x3fffULL) == (al & ~0x3fffULL))
                 ios_alert_waiter_read( &w1, (void *)(al + 4), sizeof(w1) );
         }
-        dprintf( 2, "[waiters]  tid=%04x addr=%p age=%ds %s w0=%08x w1=%08x\n",
+        dprintf( 2, "[waiters]  tid=%04x addr=%p age=%ds %s w0=%08x w1=%08x rev=b212\n",
                  (int)(ULONG_PTR)tid, a, (int)age,
                  ios_alert_waiters[i].inf ? "INF" : "TMO", w0, w1 );
+    }
+
+    /* ml441 / rev=b212: Dump non-empty slots in ios_shared_futex_queues */
+    {
+        int q_i, dumped_q = 0;
+        for (q_i = 0; q_i < 256 && dumped_q < 8; q_i++)
+        {
+            struct ios_shared_futex_queue *sq = &ios_shared_futex_queues[q_i];
+            if (sq->next && sq->next != (void *)sq)
+            {
+                struct ios_e { void *next, *prev; const void *addr; unsigned int tid; } *se;
+                void *head = (void *)sq;
+                void *scur;
+                dumped_q++;
+                for (scur = sq->next; scur && scur != head; )
+                {
+                    se = (struct ios_e *)scur;
+                    dprintf( 2, "[shared-futex-entry] slot=%d e=%p tid=%04x addr=%p rev=b212\n",
+                             q_i, se, se->tid, se->addr );
+                    scur = se->next;
+                }
+            }
+        }
     }
 }
 

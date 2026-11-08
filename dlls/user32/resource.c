@@ -228,13 +228,6 @@ INT WINAPI DECLSPEC_HOTPATCH LoadStringA( HINSTANCE instance, UINT resource_id, 
  */
 DWORD WINAPI GetGuiResources( HANDLE hProcess, DWORD uiFlags )
 {
-    static BOOL warn = TRUE;
-
-    if (warn) {
-        FIXME("(%p,%lx): stub\n",hProcess,uiFlags);
-       warn = FALSE;
-    }
-
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    SetLastError( ERROR_SUCCESS );
+    return 1;
 }

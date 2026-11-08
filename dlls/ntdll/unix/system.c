@@ -3300,11 +3300,21 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     /* iOS-Madeira ml441 (#74): private class — hands every PE ntdll copy the
      * address of the ONE process-wide futex queue table (unix sync.c), fixing
      * the per-copy futex_queues split that lost RtlWakeAddress* wakes. */
-    if ((unsigned int)class == 0xf00d && size == sizeof(void *))
+    if ((unsigned int)class == 0xf00d)
     {
         extern void *ios_get_shared_futex_queues(void);
+        static int logged_0xf00d = 0;
+        void *q = ios_get_shared_futex_queues();
+        if (logged_0xf00d++ < 40)
+        {
+            TEB *teb = NtCurrentTeb();
+            dprintf( 2, "[futex-query] tid=%04x peb=%p size=%u table=%p rev=b212\n",
+                     teb ? (unsigned)(ULONG_PTR)teb->ClientId.UniqueThread : 0,
+                     teb ? teb->Peb : NULL, (unsigned)size, q );
+        }
+        if (size != sizeof(void *)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!info) return STATUS_ACCESS_VIOLATION;
-        *(void **)info = ios_get_shared_futex_queues();
+        *(void **)info = q;
         if (ret_size) *ret_size = sizeof(void *);
         return STATUS_SUCCESS;
     }

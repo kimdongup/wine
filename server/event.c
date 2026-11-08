@@ -665,11 +665,42 @@ static const struct object_ops keyed_event_ops =
 };
 
 
+static int is_steamchrome_masterstream( const struct unicode_str *name )
+{
+    static const WCHAR target[] = {'S','t','e','a','m','C','h','r','o','m','e','_','M','a','s','t','e','r','S','t','r','e','a','m'};
+    size_t n, i, target_len = sizeof(target) / sizeof(WCHAR);
+    if (!name || !name->len) return 0;
+    n = name->len / sizeof(WCHAR);
+    if (n < target_len) return 0;
+    for (i = 0; i <= n - target_len; i++)
+    {
+        if (!memcmp( &name->str[i], target, sizeof(target) ))
+            return 1;
+    }
+    return 0;
+}
+
 struct event *create_event( struct object *root, const struct unicode_str *name,
                             unsigned int attr, int manual_reset, int initial_state,
                             const struct security_descriptor *sd )
 {
     struct event *event;
+
+    /* ml1310 / rev=b212: Unlink stale SteamChrome_MasterStream events on restart */
+    if (is_steamchrome_masterstream( name ))
+    {
+        struct object *old_obj;
+        struct unicode_str new_name;
+        if ((old_obj = lookup_named_object( root, name, attr, &new_name )))
+        {
+            if (!new_name.len)
+            {
+                fprintf( stderr, "[sc-ipc] unlinking stale event obj=%p for SteamChrome_MasterStream restart rev=b212\n", old_obj );
+                unlink_named_object( old_obj );
+            }
+            release_object( old_obj );
+        }
+    }
 
     if ((event = create_named_object( root, &event_ops, name, attr, sd )))
     {
