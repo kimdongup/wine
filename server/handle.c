@@ -401,17 +401,66 @@ struct handle_table *copy_handle_table( struct process *process, struct process 
 
     if (handles)
     {
+        unsigned int populated = 0;
+        int dbg = 0;
+#ifdef WINE_IOS
+        {
+            static int v = -1;
+            if (v < 0) { const char *e = getenv("MADEIRA_INITDATA_INHERIT_DEBUG"); v = (e && *e && *e != '0'); }
+            dbg = v;
+        }
+#endif
         memset( table->entries, 0, parent_table->count * sizeof(*table->entries) );
+#ifdef WINE_IOS
+        if (dbg || handle_count <= 8)
+            fprintf(stderr, "[initdata-inherit][ht] copy explicit pid=%04x parent=%04x count=%u parent_last=%d\n",
+                    process ? process->id : 0, parent ? parent->id : 0, handle_count, parent_table->last);
+#endif
 
         for (i = 0; i < handle_count; i++)
         {
-            inherit_handle( parent, handles[i], table );
+            obj_handle_t h = handles[i];
+            struct handle_entry *dst = table->entries;
+            struct handle_entry *src = get_handle( parent, h );
+            int index = handle_to_index( h );
+            const char *reason = "ok";
+
+            if (!src) reason = "missing";
+            else if (!(src->access & RESERVED_INHERIT)) reason = "not_inheritable";
+            else if (index < 0) reason = "bad_index";
+            else if (dst[index].ptr) reason = "dst_occupied";
+            else
+            {
+                grab_object_for_handle( src->ptr );
+                dst[index] = *src;
+                table->last = max( table->last, index );
+            }
+#ifdef WINE_IOS
+            if (dbg || handle_count <= 8 || reason[0] != 'o')
+                fprintf(stderr, "[initdata-inherit][ht] h=%04x idx=%d src=%p access=0x%x %s\n",
+                        (unsigned)h, index, src, src ? (unsigned)src->access : 0u, reason);
+#else
+            (void)dst; (void)index; (void)reason;
+#endif
         }
 
         for (i = 0; i < 3; i++)
         {
             inherit_handle( parent, std_handles[i], table );
         }
+
+        for (i = 0; i < handle_count; i++)
+        {
+            int idx = handle_to_index( handles[i] );
+            if (idx >= 0 && idx < table->count && table->entries[idx].ptr) populated++;
+        }
+#ifdef WINE_IOS
+        if (dbg || handle_count <= 8)
+            fprintf(stderr, "[initdata-inherit][ht] populated=%u/%u table_last=%d\n",
+                    populated, handle_count, table->last);
+#else
+        (void)populated;
+#endif
     }
     else
     {
@@ -725,8 +774,22 @@ DECL_HANDLER(dup_handle)
 DECL_HANDLER(get_object_info)
 {
     struct object *obj;
+#ifdef WINE_IOS
+    int _diag = 0; { static int v=-1; if(v<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); v=(e&&*e&&atoi(e)>=2)?2:(e&&*e&&*e!='0');} _diag=v; }
+    if (_diag >= 2 && req->handle <= 0x400)
+        fprintf(stderr,"[initdata-inherit][srvobj] get_object_info pid=%04x handle=%04x\n",
+                current->process?current->process->id:0,(unsigned)req->handle);
+#endif
 
-    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL ))) return;
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
+    {
+#ifdef WINE_IOS
+        if (_diag >= 2 && req->handle <= 0x400)
+            fprintf(stderr,"[initdata-inherit][srvobj] get_object_info FAIL pid=%04x handle=%04x err=%08x\n",
+                    current->process?current->process->id:0,(unsigned)req->handle,get_error());
+#endif
+        return;
+    }
 
     reply->access = get_handle_access( current->process, req->handle );
     reply->ref_count = obj->refcount;
@@ -738,8 +801,22 @@ DECL_HANDLER(get_object_name)
 {
     struct object *obj;
     WCHAR *name;
+#ifdef WINE_IOS
+    int _diag = 0; { static int v=-1; if(v<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); v=(e&&*e&&atoi(e)>=2)?2:(e&&*e&&*e!='0');} _diag=v; }
+    if (_diag >= 2 && req->handle <= 0x400)
+        fprintf(stderr,"[initdata-inherit][srvobj] get_object_name pid=%04x handle=%04x\n",
+                current->process?current->process->id:0,(unsigned)req->handle);
+#endif
 
-    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL ))) return;
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
+    {
+#ifdef WINE_IOS
+        if (_diag >= 2 && req->handle <= 0x400)
+            fprintf(stderr,"[initdata-inherit][srvobj] get_object_name FAIL pid=%04x handle=%04x err=%08x\n",
+                    current->process?current->process->id:0,(unsigned)req->handle,get_error());
+#endif
+        return;
+    }
 
     if ((name = obj->ops->get_full_name( obj, get_reply_max_size(), &reply->total )))
         set_reply_data_ptr( name, min( reply->total, get_reply_max_size() ));

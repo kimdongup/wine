@@ -770,19 +770,35 @@ static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned
             FILE_NAME_INFORMATION *name_info;
             data_size_t name_len, reply_size;
             const WCHAR *name;
+#ifdef WINE_IOS
+            int _diag = 0; { static int v=-1; if(v<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); v=(e&&*e&&*e!='0');} _diag=v; }
+#endif
 
             if (get_reply_max_size() < sizeof(*name_info))
             {
+#ifdef WINE_IOS
+                if (_diag) fprintf(stderr, "[initdata-inherit][pipefi] FileNameInformation STATUS_INFO_LENGTH_MISMATCH pid=%04x handle=%04x\n",
+                                    current->process?current->process->id:0, (unsigned)handle);
+#endif
                 set_error( STATUS_INFO_LENGTH_MISMATCH );
                 return;
             }
 
             /* FIXME: We should be able to return on unlinked pipe */
-            if (!pipe || !(name = get_object_name( &pipe->obj, &name_len )))
+            name = pipe ? get_object_name( &pipe->obj, &name_len ) : NULL;
+            if (!pipe || !name)
             {
+#ifdef WINE_IOS
+                if (_diag) fprintf(stderr, "[initdata-inherit][pipefi] FileNameInformation DISCONNECT pid=%04x handle=%04x pipe=%p name=%p end_fd=%p\n",
+                                    current->process?current->process->id:0, (unsigned)handle, pipe, name, pipe_end ? pipe_end->fd : NULL);
+#endif
                 set_error( STATUS_PIPE_DISCONNECTED );
                 return;
             }
+#ifdef WINE_IOS
+            if (_diag) fprintf(stderr, "[initdata-inherit][pipefi] FileNameInformation ok pid=%04x handle=%04x name_len=%u\n",
+                                current->process?current->process->id:0, (unsigned)handle, (unsigned)name_len);
+#endif
 
             reply_size = offsetof( FILE_NAME_INFORMATION, FileName[name_len/sizeof(WCHAR) + 1] );
             if (reply_size > get_reply_max_size())

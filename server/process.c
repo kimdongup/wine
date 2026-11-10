@@ -747,6 +747,12 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
         std_handles[2] = info->hstderr;
 
         process->parent_id = parent->id;
+#ifdef WINE_IOS
+        if (flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES)
+            fprintf(stderr, "[initdata-inherit][srv] create_process enter pid=%04x parent=%04x flags=0x%x handles=%u std=%04x,%04x,%04x\n",
+                    process->id, parent->id, flags, handle_count,
+                    (unsigned)std_handles[0], (unsigned)std_handles[1], (unsigned)std_handles[2]);
+#endif
         if (flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES)
             process->handles = copy_handle_table( process, parent, handles, handle_count, std_handles );
         else
@@ -1347,9 +1353,25 @@ DECL_HANDLER(new_process)
         goto done;
     }
 
+#ifdef WINE_IOS
+    if ((req->flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES) && req->handles_size)
+    {
+        unsigned int _hn = req->handles_size / (unsigned)sizeof(*handles), _hi;
+        fprintf(stderr, "[initdata-inherit][srv] new_process flags=0x%x handles_size=%u count=%u jobs_size=%u parent=%04x debug=%d\n",
+                req->flags, req->handles_size, _hn, req->jobs_size, parent ? parent->id : 0, req->debug);
+        if (handles && _hn <= 16)
+            for (_hi = 0; _hi < _hn; _hi++)
+                fprintf(stderr, "[initdata-inherit][srv] req_handle[%u]=%04x\n", _hi, (unsigned)handles[_hi]);
+    }
+#endif
     if (!(process = create_process( socket_fd, parent, req->flags, info->data, sd,
                                     handles, req->handles_size / sizeof(*handles), token )))
         goto done;
+#ifdef WINE_IOS
+    if ((req->flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES) && req->handles_size)
+        fprintf(stderr, "[initdata-inherit][srv] create_process result pid=%04x handles=%s\n",
+                process->id, process->handles ? "ok" : "NULL");
+#endif
 
     process->machine = req->machine;
     process->startup_info = (struct startup_info *)grab_object( info );
@@ -1571,6 +1593,14 @@ DECL_HANDLER(terminate_process)
     }
     else process = (struct process *)grab_object( current->process );
 
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag || current->process != process)
+        fprintf(stderr,"[initdata-inherit][term] caller_pid=%04x target_pid=%04x self=%d handle=%04x exit=%08x\n",
+                current&&current->process?get_process_id(current->process):0,
+                process?get_process_id(process):0,
+                current->process==process,(unsigned)req->handle,(unsigned)req->exit_code); }
+#endif
     reply->self = (current->process == process);
     terminate_process( process, current, req->exit_code );
     release_object( process );
@@ -1821,15 +1851,31 @@ DECL_HANDLER(read_process_memory)
 {
     struct process *process;
     data_size_t len = get_reply_max_size();
+    int ok = 0;
 
     if (!(process = get_process_from_handle( req->handle, PROCESS_VM_READ ))) return;
 
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag || (current&&current->process!=process))
+        fprintf(stderr,"[initdata-inherit][rpm] caller=%04x target=%04x handle=%04x addr=%llx len=%u\n",
+                current&&current->process?get_process_id(current->process):0,process?get_process_id(process):0,
+                (unsigned)req->handle,(unsigned long long)req->addr,(unsigned)len); }
+#endif
     if (len)
     {
         char *buffer = mem_alloc( len );
         if (buffer)
         {
-            if (read_process_memory( process, req->addr, len, buffer ))
+            ok = read_process_memory( process, req->addr, len, buffer );
+#ifdef WINE_IOS
+            { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+              if(_diag || (current&&current->process!=process))
+                fprintf(stderr,"[initdata-inherit][rpm-done] caller=%04x target=%04x addr=%llx len=%u ok=%d err=%08x\n",
+                        current&&current->process?get_process_id(current->process):0,process?get_process_id(process):0,
+                        (unsigned long long)req->addr,(unsigned)len,ok,(unsigned)get_error()); }
+#endif
+            if (ok)
                 set_reply_data_ptr( buffer, len );
             else
                 free( buffer );

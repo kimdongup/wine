@@ -717,8 +717,26 @@ DECL_HANDLER(get_exception_status)
 DECL_HANDLER(set_debug_obj_info)
 {
     struct debug_obj *debug_obj;
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag) fprintf(stderr,"[initdata-inherit][sdoi] pid=%04x handle=%04x flags=%x\n",
+                        current&&current->process?get_process_id(current->process):0,(unsigned)req->debug,(unsigned)req->flags); }
+#endif
 
-    if (!(debug_obj = get_debug_obj( current->process, req->debug, DEBUG_SET_INFORMATION ))) return;
+    if (!(debug_obj = get_debug_obj( current->process, req->debug, DEBUG_SET_INFORMATION )))
+    {
+#ifdef WINE_IOS
+        { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+          if(_diag) fprintf(stderr,"[initdata-inherit][sdoi-fail] pid=%04x handle=%04x err=%08x\n",
+                            current&&current->process?get_process_id(current->process):0,(unsigned)req->debug,(unsigned)get_error()); }
+#endif
+        return;
+    }
     debug_obj->flags = req->flags;
     release_object( debug_obj );
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag) fprintf(stderr,"[initdata-inherit][sdoi-done] pid=%04x handle=%04x\n",
+                        current&&current->process?get_process_id(current->process):0,(unsigned)req->debug); }
+#endif
 }

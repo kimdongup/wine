@@ -2797,13 +2797,21 @@ static void *get_host_addr_space_limit(void)
 static void alloc_arm64ec_map(void)
 {
     unsigned int status;
-    SIZE_T size = ((ULONG_PTR)address_space_limit + page_size) >> (page_shift + 3);  /* one bit per page */
+    /* Size from the host/actual address-space ceiling when known. The theoretical
+     * 64-bit address_space_limit can make a ~4 GiB bitmap on iOS, which cannot
+     * fit when extended virtual addressing is absent (smaller task VA ceiling).
+     * Capping to host_addr_space_limit preserves coverage of mappable addresses. */
+    ULONG_PTR ec_limit = (ULONG_PTR)address_space_limit;
+    if (host_addr_space_limit && (ULONG_PTR)host_addr_space_limit < ec_limit)
+        ec_limit = (ULONG_PTR)host_addr_space_limit;
+    SIZE_T size = (ec_limit + page_size) >> (page_shift + 3);  /* one bit per page */
 
     size = ROUND_SIZE( 0, size, host_page_mask );
     status = map_view( &arm64ec_view, NULL, size, MEM_TOP_DOWN, VPROT_READ | VPROT_COMMITTED, 0, 0, 0 );
     if (status)
     {
-        ERR( "failed to allocate ARM64EC map: %08x\n", status );
+        ERR( "failed to allocate ARM64EC map: %08x (size=0x%lx ec_limit=%p host_limit=%p)\n",
+             status, (unsigned long)size, (void *)ec_limit, host_addr_space_limit );
         exit(1);
     }
     peb->EcCodeBitMap = arm64ec_view->base;

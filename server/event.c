@@ -35,6 +35,7 @@
 
 #include "handle.h"
 #include "thread.h"
+#include "process.h"
 #include "request.h"
 #include "security.h"
 
@@ -384,6 +385,11 @@ static int event_sync_add_queue( struct object *obj, struct wait_queue_entry *en
     assert( obj->ops == &event_sync_ops );
     if (event->cell >= 0)
         __atomic_add_fetch( &madeira_sync_cells[event->cell].srv_waiters, 1, __ATOMIC_SEQ_CST );
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag && !event->manual) fprintf(stderr,"[initdata-inherit][evt-q] add pid=%04x tid=%04x obj=%p manual=%d cell=%d state=%u\n",
+                        current&&current->process?get_process_id(current->process):0,current?current->id:0,(void*)obj,event->manual,event->cell,(unsigned)event_sync_state(event)); }
+#endif
     return add_queue( obj, entry );
 }
 
@@ -396,11 +402,17 @@ static void event_sync_remove_queue( struct object *obj, struct wait_queue_entry
      * exists, so the release is not currently the last one; this is here so it
      * stays correct if that ever stops being true.) */
     int cell = event->cell;
+    int manual = event->manual;
 
     assert( obj->ops == &event_sync_ops );
     remove_queue( obj, entry );
     if (cell >= 0)
         __atomic_sub_fetch( &madeira_sync_cells[cell].srv_waiters, 1, __ATOMIC_SEQ_CST );
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag && !manual) fprintf(stderr,"[initdata-inherit][evt-q] rm pid=%04x tid=%04x obj=%p manual=%d cell=%d\n",
+                        current&&current->process?get_process_id(current->process):0,current?current->id:0,(void*)obj,manual,cell); }
+#endif
 }
 
 static void event_sync_destroy( struct object *obj )
@@ -1117,6 +1129,14 @@ DECL_HANDLER(event_op)
 #else
     reply->state = sync->signaled;
 #endif
+    {
+#ifdef WINE_IOS
+        static int _diag = -1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+        if (_diag && !sync->manual) fprintf(stderr,"[initdata-inherit][evt-op] pid=%04x handle=%04x op=%u obj=%p sync=%p manual=%d cell=%d state=%u\n",
+                           current&&current->process?get_process_id(current->process):0,(unsigned)req->handle,(unsigned)req->op,
+                           event,event->sync,sync->manual,sync->cell,(unsigned)event_sync_state(sync));
+#endif
+    }
     switch(req->op)
     {
     case PULSE_EVENT:
@@ -1145,6 +1165,13 @@ DECL_HANDLER(event_op)
         set_error( STATUS_INVALID_PARAMETER );
         break;
     }
+#ifdef WINE_IOS
+    {
+        static int _diag = -1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+        if (_diag && !sync->manual) fprintf(stderr,"[initdata-inherit][evt-op-done] pid=%04x handle=%04x op=%u state=%u\n",
+                           current&&current->process?get_process_id(current->process):0,(unsigned)req->handle,(unsigned)req->op,(unsigned)event_sync_state(sync));
+    }
+#endif
     release_object( event );
 }
 
